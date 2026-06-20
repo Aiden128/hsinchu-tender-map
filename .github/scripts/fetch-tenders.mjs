@@ -10,10 +10,35 @@ const BASE = "https://pcc-api.openfun.app/api";
 const UNIT_ID = "3.76.58";
 const CONCURRENCY = 5; // parallel page fetches
 
-async function fetchJSON(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
-  return res.json();
+async function fetchJSON(url, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; HsinchuTenderBot/1.0; +https://github.com/Aiden128/hsinchu-tender-map)",
+          "Accept": "application/json",
+          "Referer": "https://pcc-api.openfun.app/",
+        },
+      });
+      if (res.ok) return res.json();
+      // Retry on 429 (rate limit), 5xx (server error); fail fast on 4xx auth errors
+      if (res.status === 429 || res.status >= 500) {
+        if (attempt < retries) {
+          const delay = Math.min(1000 * 2 ** attempt, 15000);
+          console.warn(`  HTTP ${res.status} on attempt ${attempt}/${retries}, retrying in ${delay}ms...`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+      }
+      throw new Error(`HTTP ${res.status}: ${url}`);
+    } catch (e) {
+      if (e.message.startsWith("HTTP ")) throw e; // Non-retryable HTTP error
+      if (attempt === retries) throw e;
+      const delay = Math.min(1000 * 2 ** attempt, 15000);
+      console.warn(`  Network error on attempt ${attempt}/${retries}: ${e.message}, retrying in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
 }
 
 async function main() {
