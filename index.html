@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>新竹市標案地圖 — Hsinchu Tender Explorer</title>
+  <meta name="description" content="瀏覽新竹市政府公開標案，查詢廠商得標記錄，掌握公共採購資訊。">
+  <meta property="og:title" content="新竹市標案地圖">
+  <meta property="og:description" content="瀏覽新竹市政府公開標案，查詢廠商得標記錄，掌握公共採購資訊。">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --color-primary: #1e40af;
+      --color-primary-light: #3b82f6;
+      --color-primary-dark: #1e3a5f;
+      --color-accent: #d97706;
+      --color-surface: #f8fafc;
+      --color-card: #ffffff;
+      --color-text: #1e293b;
+      --color-text-secondary: #64748b;
+      --color-border: #e2e8f0;
+      --radius-card: 0.75rem;
+      --shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      --shadow-hover: 0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+      background: var(--color-surface);
+      color: var(--color-text);
+    }
+
+    .card { border-radius: var(--radius-card); box-shadow: var(--shadow-card); background: var(--color-card); }
+    .card:hover { box-shadow: var(--shadow-hover); }
+
+    /* Slide-in panels */
+    .panel-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 40; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+    .panel-overlay.active { opacity: 1; pointer-events: auto; }
+    .slide-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; max-width: 100vw; background: #fff; z-index: 50; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); overflow-y: auto; box-shadow: -4px 0 24px rgba(0,0,0,0.12); }
+    .slide-panel.active { transform: translateX(0); }
+    @media (max-width: 640px) { .slide-panel { width: 100vw; } }
+
+    /* Type badges */
+    .badge { display: inline-block; padding: 0.125rem 0.625rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; white-space: nowrap; }
+    .badge-award { background: #dcfce7; color: #166534; }
+    .badge-invitation { background: #dbeafe; color: #1e40af; }
+    .badge-failed { background: #fee2e2; color: #991b1b; }
+    .badge-correct { background: #fef9c3; color: #854d0e; }
+    .badge-quote { background: #f3e8ff; color: #6b21a8; }
+    .badge-other { background: #f1f5f9; color: #475569; }
+
+    /* Loading skeleton */
+    .skeleton { background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 0.5rem; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* Search input */
+    .search-input:focus { outline: none; border-color: var(--color-primary-light); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+
+    /* Smooth scroll */
+    html { scroll-behavior: smooth; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Overlay -->
+  <div id="panelOverlay" class="panel-overlay" onclick="closeAllPanels()"></div>
+
+  <!-- Detail Panel -->
+  <aside id="detailPanel" class="slide-panel" role="dialog" aria-label="標案詳細資料">
+    <div id="detailContent" class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-lg font-bold text-[var(--color-primary-dark)]">標案詳細資料</h2>
+        <button onclick="closeDetailPanel()" class="p-2 hover:bg-gray-100 rounded-lg transition-colors" aria-label="關閉">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <div id="detailBody"><!-- rendered by JS --></div>
+    </div>
+  </aside>
+
+  <!-- Company History Panel -->
+  <aside id="companyPanel" class="slide-panel" role="dialog" aria-label="廠商得標記錄">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <button onclick="closeCompanyPanel()" class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] mb-2 flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+            返回標案
+          </button>
+          <h2 class="text-lg font-bold text-[var(--color-primary-dark)]" id="companyPanelTitle">廠商得標記錄</h2>
+        </div>
+        <button onclick="closeCompanyPanel()" class="p-2 hover:bg-gray-100 rounded-lg transition-colors" aria-label="關閉">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <div id="companyBody"><!-- rendered by JS --></div>
+    </div>
+  </aside>
+
+  <!-- Error Banner -->
+  <div id="errorBanner" class="hidden fixed top-0 left-0 right-0 z-30 bg-red-50 border-b border-red-200 p-4">
+    <div class="max-w-5xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <svg class="w-5 h-5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        <span id="errorMessage" class="text-sm text-red-800"></span>
+      </div>
+      <button onclick="hideError()" class="text-red-500 hover:text-red-700">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Offline Banner -->
+  <div id="offlineBanner" class="hidden fixed top-0 left-0 right-0 z-30 bg-yellow-50 border-b border-yellow-200 p-3 text-center text-sm text-yellow-800">
+    ⚠️ 網路連線中斷，部分功能可能無法使用
+  </div>
+
+  <!-- Main Content -->
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <!-- Header -->
+    <header class="mb-8">
+      <div class="flex items-center gap-3 mb-2">
+        <div class="w-10 h-10 rounded-xl bg-[var(--color-primary)] flex items-center justify-center text-white font-bold text-lg shadow-sm">標</div>
+        <div>
+          <h1 class="text-2xl font-bold text-[var(--color-primary-dark)]">新竹市標案地圖</h1>
+          <p class="text-sm text-[var(--color-text-secondary)]">瀏覽新竹市政府公開標案與廠商得標記錄</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Search Bar -->
+    <div class="mb-6">
+      <div class="flex gap-3">
+        <div class="flex-1 relative">
+          <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--color-text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <input type="text" id="searchInput" placeholder="搜尋標案名稱，例如：道路、資訊、停車..." class="search-input w-full pl-12 pr-4 py-3 rounded-xl border border-[var(--color-border)] bg-white text-base transition-all" autocomplete="off">
+        </div>
+        <button onclick="triggerSearch()" class="px-6 py-3 bg-[var(--color-primary)] text-white rounded-xl font-medium hover:bg-[var(--color-primary-light)] transition-colors shadow-sm">
+          搜尋
+        </button>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div id="filtersBar" class="mb-6">
+      <!-- Type filters -->
+      <div class="flex flex-wrap gap-2 mb-3" id="typeFilters">
+        <button data-type="all" class="filter-btn active px-3 py-1.5 rounded-full text-sm font-medium border transition-colors bg-[var(--color-primary)] text-white border-[var(--color-primary)]">全部</button>
+      </div>
+      <!-- Date range -->
+      <div class="flex items-center gap-3 text-sm text-[var(--color-text-secondary)]">
+        <label class="flex items-center gap-2">
+          <span>從</span>
+          <input type="date" id="dateFrom" class="border border-[var(--color-border)] rounded-lg px-3 py-1.5 text-sm bg-white">
+        </label>
+        <label class="flex items-center gap-2">
+          <span>到</span>
+          <input type="date" id="dateTo" class="border border-[var(--color-border)] rounded-lg px-3 py-1.5 text-sm bg-white">
+        </label>
+        <button onclick="clearFilters()" id="clearFiltersBtn" class="hidden text-[var(--color-primary)] hover:underline ml-2">清除篩選</button>
+      </div>
+    </div>
+
+    <!-- Stats & Status -->
+    <div class="flex items-center justify-between mb-4">
+      <div id="statsBar" class="text-sm text-[var(--color-text-secondary)]">
+        <span id="statsText">載入中...</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="refreshBtn" onclick="refreshFromPcc()" class="hidden text-xs px-3 py-1.5 border border-[var(--color-border)] rounded-lg text-[var(--color-text-secondary)] hover:bg-gray-50 hover:text-[var(--color-primary)] transition-colors" title="從 PCC 官方 API 即時查詢最新資料">
+          <svg class="w-3.5 h-3.5 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          從 PCC 更新
+        </button>
+        <div id="loadingSpinner" class="hidden">
+          <svg class="animate-spin h-5 w-5 text-[var(--color-primary)]" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsSection" class="space-y-3">
+      <!-- Cards rendered by JS -->
+    </div>
+
+    <!-- Load More -->
+    <div id="loadMoreSection" class="hidden text-center py-6">
+      <button onclick="loadMore()" class="px-8 py-3 border-2 border-[var(--color-border)] rounded-xl text-[var(--color-text-secondary)] font-medium hover:border-[var(--color-primary-light)] hover:text-[var(--color-primary)] transition-colors">
+        載入更多標案
+      </button>
+    </div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="hidden text-center py-16">
+      <svg class="w-16 h-16 mx-auto text-[var(--color-border)] mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+      <h3 class="text-lg font-medium text-[var(--color-text-secondary)] mb-1">查無相關標案</h3>
+      <p class="text-sm text-[var(--color-text-secondary)]">請嘗試其他關鍵字或調整篩選條件</p>
+    </div>
+
+    <!-- Footer -->
+    <footer class="mt-12 pt-6 border-t border-[var(--color-border)] text-center text-sm text-[var(--color-text-secondary)]">
+      <p class="mb-1">資料來源：<a href="https://pcc.g0v.ronny.tw/" target="_blank" rel="noopener" class="text-[var(--color-primary)] hover:underline">g0v 政府標案 API</a> · 政府電子採購網</p>
+      <p>非官方網站 · 僅供參考</p>
+    </footer>
+  </div>
+
+  <script>
+    // ============================================================
+    // State
+    // ============================================================
+    const state = {
+      query: '',
+      records: [],
+      allRecords: [], // initial page's full records for client-side filtering
+      totalRecords: 0,
+      page: 1,
+      pageSize: 1000, // listbyunit returns 1000 per page
+      loading: false,
+      error: null,
+      selectedTender: null,
+      selectedTenderDetail: null,
+      companyHistory: null,
+      companyName: null,
+      companyLoading: false,
+      filters: { types: [], dateFrom: null, dateTo: null },
+      activeTypeFilter: 'all',
+      mode: 'list', // 'list' | 'detail' | 'company'
+      currentPageRecords: [], // filtered subset of records
+      localLoadedPages: 0,   // pages loaded from local cache (0 = using API)
+    };
+
+    const API_BASE = 'https://pcc-api.openfun.app/api';
+    const HC_UNIT_ID = '3.76.58';
+
+    // ============================================================
+    // Local Data (GitHub Pages cache)
+    // ============================================================
+    let localMeta = null; // { total, totalPages, updatedAt }
+
+    async function tryLoadLocalData() {
+      try {
+        const idxResp = await fetch('./data/index.json');
+        if (!idxResp.ok) return false;
+        const idx = await idxResp.json();
+        const p1Resp = await fetch('./data/page-1.json');
+        if (!p1Resp.ok) return false;
+        const p1 = await p1Resp.json();
+        localMeta = { total: idx.total, totalPages: idx.totalPages, updatedAt: idx.updatedAt };
+        state.records = p1.records || [];
+        state.totalRecords = idx.total;
+        state.localLoadedPages = 1;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    async function fetchLocalPage(page) {
+      try {
+        const resp = await fetch(`./data/page-${page}.json`);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.records || [];
+      } catch {
+        return null;
+      }
+    }
+
+    // ============================================================
+    // API Client
+    // ============================================================
+    async function apiFetch(url) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      try {
+        const resp = await fetch(url, { signal: controller.signal });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          return { data: null, error: `HTTP ${resp.status}${text ? ': ' + text.slice(0, 200) : ''}` };
+        }
+        const data = await resp.json();
+        return { data, error: null };
+      } catch (err) {
+        if (err.name === 'AbortError') return { data: null, error: '請求超時，請稍後再試' };
+        if (err.message === 'Failed to fetch' || err.name === 'TypeError') return { data: null, error: '網路連線異常' };
+        return { data: null, error: err.message || '未知錯誤' };
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    async function fetchListByUnit(page = 1) {
+      return apiFetch(`${API_BASE}/listbyunit?unit_id=${HC_UNIT_ID}&page=${page}`);
+    }
+
+    async function fetchSearchByTitle(query, page = 1) {
+      const encoded = encodeURIComponent(query);
+      const result = await apiFetch(`${API_BASE}/searchbytitle?query=${encoded}&page=${page}`);
+      // If search fails (400 etc), fallback to listbyunit + client filter
+      if (result.error) {
+        const fallback = await fetchListByUnit(page);
+        if (fallback.data) {
+          // client-side filter
+          const q = query.toLowerCase();
+          fallback.data.records = fallback.data.records.filter(r =>
+            (r.brief && r.brief.title && r.brief.title.toLowerCase().includes(q)) ||
+            (r.unit_name && r.unit_name.toLowerCase().includes(q))
+          );
+        }
+        return fallback;
+      }
+      return result;
+    }
+
+    async function fetchTenderDetail(unitId, jobNumber) {
+      return apiFetch(`${API_BASE}/tender?unit_id=${unitId}&job_number=${jobNumber}`);
+    }
+
+    async function fetchCompanyHistory(companyName) {
+      const encoded = encodeURIComponent(companyName);
+      return apiFetch(`${API_BASE}/searchbycompanyname?query=${encoded}`);
+    }
+
+    // ============================================================
+    // Utility Functions
+    // ============================================================
+    function formatDate(dateInt) {
+      if (!dateInt) return '—';
+      const s = String(dateInt);
+      if (s.length === 8) {
+        const y = parseInt(s.slice(0, 4));
+        const m = parseInt(s.slice(4, 6));
+        const d = parseInt(s.slice(6, 8));
+        return `${y} 年 ${m} 月 ${d} 日`;
+      }
+      return s;
+    }
+
+    function getTypeClass(typeStr) {
+      if (!typeStr) return 'badge-other';
+      if (typeStr.includes('決標')) return 'badge-award';
+      if (typeStr.includes('招標')) return 'badge-invitation';
+      if (typeStr.includes('無法決標')) return 'badge-failed';
+      if (typeStr.includes('更正')) return 'badge-correct';
+      if (typeStr.includes('公開取得') || typeStr.includes('報價')) return 'badge-quote';
+      return 'badge-other';
+    }
+
+    function extractCompanies(record) {
+      if (!record || !record.brief || !record.brief.companies) return [];
+      const c = record.brief.companies;
+      const names = c.names || [];
+      const ids = c.ids || [];
+      return names.map((name, i) => ({ name, id: ids[i] || '' }));
+    }
+
+    function getDetailValue(detail, key) {
+      if (!detail) return null;
+      return detail[key] || null;
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '—';
+      const d = document.createElement('div');
+      d.textContent = text;
+      return d.innerHTML;
+    }
+
+    // ============================================================
+    // Render Functions
+    // ============================================================
+    function renderResults(records) {
+      const section = document.getElementById('resultsSection');
+      if (!records || records.length === 0) {
+        document.getElementById('emptyState').classList.remove('hidden');
+        document.getElementById('loadMoreSection').classList.add('hidden');
+        section.innerHTML = '';
+        return;
+      }
+      document.getElementById('emptyState').classList.add('hidden');
+      
+      let html = '';
+      for (const r of records) {
+        const title = r.brief?.title || '無標題';
+        const type = r.brief?.type || '';
+        const unitName = r.unit_name || '';
+        const date = r.date || '';
+        const companies = extractCompanies(r);
+        const unitId = r.unit_id || '';
+        const jobNumber = r.job_number || '';
+        const typeClass = getTypeClass(type);
+
+        html += `
+          <div class="card p-5 cursor-pointer transition-all hover:-translate-y-0.5" 
+               data-unit-id="${escapeHtml(unitId)}" data-job-number="${escapeHtml(jobNumber)}"
+               onclick="openDetail('${escapeHtml(unitId)}', '${escapeHtml(jobNumber)}', this)">
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="badge ${typeClass}">${escapeHtml(type)}</span>
+                  ${date ? `<span class="text-xs text-[var(--color-text-secondary)] shrink-0">${formatDate(date)}</span>` : ''}
+                </div>
+                <h3 class="text-base font-semibold text-[var(--color-text)] leading-snug mb-1 line-clamp-2">${escapeHtml(title)}</h3>
+                <p class="text-sm text-[var(--color-text-secondary)]">${escapeHtml(unitName)}</p>
+              </div>
+              <svg class="w-5 h-5 text-[var(--color-text-secondary)] shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </div>
+            ${companies.length > 0 ? `
+              <div class="mt-3 pt-3 border-t border-[var(--color-border)] flex flex-wrap gap-2">
+                ${companies.map(c => `<span class="company-chip text-xs px-2 py-1 rounded-md bg-gray-50 text-[var(--color-text-secondary)] hover:bg-gray-100 hover:text-[var(--color-primary)] cursor-pointer transition-colors" onclick="event.stopPropagation(); openCompanyHistory('${escapeHtml(c.name)}')">🏢 ${escapeHtml(c.name)}</span>`).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }
+      section.innerHTML = html;
+
+      // Show/hide load more
+      const hasMore = state.page * state.pageSize < state.totalRecords;
+      document.getElementById('loadMoreSection').classList.toggle('hidden', !hasMore);
+    }
+
+    function renderSkeletons(count = 5) {
+      let html = '';
+      for (let i = 0; i < count; i++) {
+        html += `
+          <div class="card p-5">
+            <div class="flex gap-2 mb-3"><div class="skeleton h-5 w-20"></div><div class="skeleton h-5 w-16"></div></div>
+            <div class="skeleton h-6 w-3/4 mb-2"></div>
+            <div class="skeleton h-4 w-1/2 mb-3"></div>
+            <div class="skeleton h-4 w-1/3"></div>
+          </div>
+        `;
+      }
+      document.getElementById('resultsSection').innerHTML = html;
+    }
+
+    function renderDetailPanel(detail) {
+      const body = document.getElementById('detailBody');
+      if (!detail || !detail.detail) {
+        body.innerHTML = `<p class="text-[var(--color-text-secondary)]">無詳細資料</p>`;
+        return;
+      }
+      const d = detail.detail;
+      const type = d.type || '';
+      const url = d.url || '';
+      
+      // Collect all fields (skip type and url as they're displayed separately)
+      const fields = Object.entries(d).filter(([k]) => k !== 'type' && k !== 'url');
+      
+      let html = '';
+      html += `<div class="mb-4"><span class="badge ${getTypeClass(type)} text-sm px-3 py-1">${escapeHtml(type)}</span></div>`;
+      
+      if (fields.length === 0) {
+        html += `<p class="text-[var(--color-text-secondary)]">暫無詳細資料</p>`;
+      } else {
+        html += `<div class="space-y-3">`;
+        for (const [key, val] of fields) {
+          if (!val) continue;
+          const displayKey = key.replace(/[:：]/g, ' › ');
+          const displayVal = typeof val === 'string' ? escapeHtml(val) : JSON.stringify(val);
+          html += `
+            <div class="border-b border-[var(--color-border)] pb-2 last:border-0">
+              <span class="text-xs text-[var(--color-text-secondary)] block mb-0.5">${escapeHtml(displayKey)}</span>
+              <span class="text-sm">${displayVal}</span>
+            </div>
+          `;
+        }
+        html += `</div>`;
+      }
+
+      // Companies from the original record
+      if (state.selectedTender) {
+        const companies = extractCompanies(state.selectedTender);
+        if (companies.length > 0) {
+          html += `<div class="mt-6 pt-4 border-t border-[var(--color-border)]"><h3 class="text-sm font-semibold text-[var(--color-text)] mb-3">相關廠商</h3>`;
+          for (const c of companies) {
+            html += `
+              <button onclick="openCompanyHistory('${escapeHtml(c.name)}')" class="w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors border border-[var(--color-border)] mb-2">
+                <span class="text-sm font-medium text-[var(--color-primary)]">${escapeHtml(c.name)}</span>
+                <span class="text-xs text-[var(--color-text-secondary)] block mt-0.5">點擊查看歷史得標記錄 →</span>
+              </button>
+            `;
+          }
+          html += `</div>`;
+        }
+      }
+
+      // Original link
+      if (url) {
+        html += `<div class="mt-6"><a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="text-sm text-[var(--color-primary)] hover:underline">查看原始公告 →</a></div>`;
+      }
+
+      body.innerHTML = html;
+    }
+
+    function renderDetailSkeleton() {
+      document.getElementById('detailBody').innerHTML = `
+        <div class="skeleton h-6 w-24 mb-4"></div>
+        <div class="space-y-3">
+          ${Array(8).fill('<div class="skeleton h-4 w-full"></div>').join('')}
+        </div>
+      `;
+    }
+
+    function renderCompanyHistory(records, companyName) {
+      const body = document.getElementById('companyBody');
+      document.getElementById('companyPanelTitle').textContent = `${companyName} 的歷史得標記錄`;
+
+      if (!records || records.length === 0) {
+        body.innerHTML = `<p class="text-[var(--color-text-secondary)] text-center py-8">該廠商暫無其他得標記錄</p>`;
+        return;
+      }
+
+      let html = `<p class="text-sm text-[var(--color-text-secondary)] mb-4">共 ${records.length} 筆相關標案</p>
+        <div class="space-y-3">`;
+      
+      for (const r of records.slice(0, 50)) { // limit to 50
+        const title = r.brief?.title || '無標題';
+        const type = r.brief?.type || '';
+        const date = r.date || '';
+        const unitName = r.unit_name || '';
+        html += `
+          <div class="p-3 rounded-lg border border-[var(--color-border)] hover:bg-gray-50 transition-colors">
+            <span class="badge ${getTypeClass(type)}">${escapeHtml(type)}</span>
+            <h4 class="text-sm font-medium mt-1">${escapeHtml(title)}</h4>
+            <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">${escapeHtml(unitName)} · ${formatDate(date)}</p>
+          </div>
+        `;
+      }
+      html += `</div>`;
+      if (records.length > 50) {
+        html += `<p class="text-xs text-[var(--color-text-secondary)] text-center mt-3">僅顯示最近 50 筆記錄</p>`;
+      }
+      body.innerHTML = html;
+    }
+
+    function renderCompanySkeleton() {
+      document.getElementById('companyBody').innerHTML = `
+        <div class="skeleton h-4 w-32 mb-4"></div>
+        ${Array(5).fill('<div class="skeleton h-16 w-full mb-3"></div>').join('')}
+      `;
+    }
+
+    function renderStats() {
+      const total = state.totalRecords || 0;
+      const showing = state.currentPageRecords.length || 0;
+      let suffix = '';
+      if (localMeta) {
+        const updateDate = localMeta.updatedAt
+          ? new Date(localMeta.updatedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : '';
+        suffix = ` · 快取 ${updateDate}`;
+      }
+      document.getElementById('statsText').textContent = state.query
+        ? `「${state.query}」搜尋結果：${showing} 筆${suffix}`
+        : `新竹市政府公開標案：${total.toLocaleString()} 筆 · 顯示 ${showing} 筆${suffix}`;
+      
+      document.getElementById('refreshBtn').classList.toggle('hidden', !localMeta);
+    }
+
+    function renderFilters(records) {
+      // Extract unique types from records
+      const typeCounts = {};
+      if (records) {
+        for (const r of records) {
+          const t = r.brief?.type || '其他';
+          typeCounts[t] = (typeCounts[t] || 0) + 1;
+        }
+      }
+      
+      const container = document.getElementById('typeFilters');
+      // Keep the "all" button, add type buttons
+      let html = `<button data-type="all" class="filter-btn px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${state.activeTypeFilter === 'all' ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]' : 'bg-white text-[var(--color-text-secondary)] border-[var(--color-border)] hover:border-[var(--color-primary-light)]'}">全部</button>`;
+      
+      // Sort types by count desc
+      const sorted = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]);
+      for (const [type, count] of sorted) {
+        const active = state.activeTypeFilter === type;
+        html += `<button data-type="${escapeHtml(type)}" class="filter-btn px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${active ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]' : 'bg-white text-[var(--color-text-secondary)] border-[var(--color-border)] hover:border-[var(--color-primary-light)]'}">${escapeHtml(type)} (${count})</button>`;
+      }
+      container.innerHTML = html;
+
+      // Bind click events
+      container.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const type = btn.dataset.type;
+          state.activeTypeFilter = type;
+          applyFilters();
+        });
+      });
+    }
+
+    // ============================================================
+    // Filtering & Search
+    // ============================================================
+    function applyFilters() {
+      let filtered = [...state.records];
+
+      // Type filter
+      if (state.activeTypeFilter && state.activeTypeFilter !== 'all') {
+        filtered = filtered.filter(r => (r.brief?.type || '') === state.activeTypeFilter);
+      }
+
+      // Date range
+      const dateFrom = document.getElementById('dateFrom').value;
+      const dateTo = document.getElementById('dateTo').value;
+      if (dateFrom) {
+        const fromNum = parseInt(dateFrom.replace(/-/g, ''));
+        filtered = filtered.filter(r => r.date >= fromNum);
+      }
+      if (dateTo) {
+        const toNum = parseInt(dateTo.replace(/-/g, ''));
+        filtered = filtered.filter(r => r.date <= toNum);
+      }
+
+      state.currentPageRecords = filtered;
+      renderResults(filtered);
+      renderStats();
+      renderFilters(state.records);
+
+      // Show/hide clear filters
+      document.getElementById('clearFiltersBtn').classList.toggle('hidden', !dateFrom && !dateTo && state.activeTypeFilter === 'all');
+    }
+
+    function clearFilters() {
+      document.getElementById('dateFrom').value = '';
+      document.getElementById('dateTo').value = '';
+      state.activeTypeFilter = 'all';
+      applyFilters();
+    }
+
+    async function refreshFromPcc() {
+      // Switch from local cache to live PCC API
+      localMeta = null;
+      state.localLoadedPages = 0;
+      document.getElementById('refreshBtn').classList.add('hidden');
+      await triggerSearch();
+    }
+
+    async function triggerSearch() {
+      if (state.loading) return; // Guard against stale/overlapping searches
+      const input = document.getElementById('searchInput');
+      const q = input.value.trim();
+      state.query = q;
+      state.page = 1;
+      state.loading = true;
+      showLoading();
+      hideError();
+
+      if (localMeta && !q) {
+        // Empty search with local data — reload from local cache
+        const ok = await tryLoadLocalData();
+        if (ok) {
+          state.loading = false;
+          hideLoading();
+          state.allRecords = [...state.records];
+          applyFilters();
+          renderFilters(state.records);
+          return;
+        }
+      }
+
+      let result;
+      if (q) {
+        result = await fetchSearchByTitle(q, 1);
+        if (result.data) {
+          // searchbytitle may return results from all units — filter to Hsinchu City
+          const allRecords = result.data.records || [];
+          state.records = allRecords.filter(r => r.unit_id && r.unit_id.startsWith('3.76.58'));
+          state.totalRecords = state.records.length;
+        }
+      } else {
+        result = await fetchListByUnit(1);
+        if (result.data) {
+          state.records = result.data.records || [];
+          state.totalRecords = result.data.total_records || state.records.length;
+        }
+      }
+
+      state.loading = false;
+      hideLoading();
+
+      if (result.error) {
+        showError(result.error);
+        return;
+      }
+
+      if (state.records.length === 0) {
+        renderResults([]);
+        renderStats();
+        document.getElementById('loadMoreSection').classList.add('hidden');
+        return;
+      }
+
+      applyFilters();
+      renderFilters(state.records);
+    }
+
+    async function loadMore() {
+      if (state.loading) return; // Guard against rapid clicks
+      state.page++;
+      state.loading = true;
+      showLoading();
+
+      let newRecords = [];
+
+      if (localMeta && !state.query && state.page <= localMeta.totalPages) {
+        // Try loading from local cache
+        const records = await fetchLocalPage(state.page);
+        if (records && records.length > 0) {
+          newRecords = records;
+          state.localLoadedPages = state.page;
+        } else {
+          // Fall back to PCC API if local page is missing
+          const result = await fetchListByUnit(state.page);
+          if (result.data) {
+            newRecords = (result.data.records || []).filter(r => r.unit_id && r.unit_id.startsWith('3.76.58'));
+            // Disable local mode since cache is incomplete
+            localMeta = null;
+          }
+          if (newRecords.length === 0) {
+            showError('無法載入更多資料');
+            state.page--;
+            state.loading = false;
+            hideLoading();
+            return;
+          }
+        }
+      } else {
+        // PCC API
+        let result;
+        if (state.query) {
+          result = await fetchSearchByTitle(state.query, state.page);
+        } else {
+          result = await fetchListByUnit(state.page);
+        }
+
+        if (result.error) {
+          showError(result.error);
+          state.page--;
+          state.loading = false;
+          hideLoading();
+          return;
+        }
+
+        newRecords = (result.data?.records || []).filter(r => r.unit_id && r.unit_id.startsWith('3.76.58'));
+      }
+
+      state.records = [...state.records, ...newRecords];
+      state.loading = false;
+      hideLoading();
+      applyFilters();
+    }
+
+    // ============================================================
+    // Detail Panel
+    // ============================================================
+    async function openDetail(unitId, jobNumber, cardEl) {
+      state.mode = 'detail';
+      state.selectedTender = { unit_id: unitId, job_number: jobNumber };
+      // Store the card data
+      if (cardEl) {
+        // Find the record in state
+        state.selectedTender = state.currentPageRecords.find(r => r.unit_id === unitId && r.job_number === jobNumber) || { unit_id: unitId, job_number: jobNumber };
+      }
+      
+      document.getElementById('detailPanel').classList.add('active');
+      document.getElementById('panelOverlay').classList.add('active');
+      renderDetailSkeleton();
+      
+      const result = await fetchTenderDetail(unitId, jobNumber);
+      if (result.data) {
+        state.selectedTenderDetail = result.data;
+        // Merge with original record for companies
+        renderDetailPanel(result.data);
+      } else {
+        // Render what we have from the original record
+        renderDetailPanel({ detail: { type: state.selectedTender?.brief?.type || '' } });
+      }
+    }
+
+    function closeDetailPanel() {
+      document.getElementById('detailPanel').classList.remove('active');
+      document.getElementById('panelOverlay').classList.remove('active');
+      state.mode = 'list';
+    }
+
+    function closeAllPanels() {
+      closeDetailPanel();
+      closeCompanyPanel();
+    }
+
+    // ============================================================
+    // Company History Panel
+    // ============================================================
+    async function openCompanyHistory(companyName) {
+      state.companyName = companyName;
+      state.mode = 'company';
+      state.companyLoading = true;
+      
+      document.getElementById('companyPanel').classList.add('active');
+      document.getElementById('panelOverlay').classList.add('active');
+      renderCompanySkeleton();
+      
+      const result = await fetchCompanyHistory(companyName);
+      state.companyLoading = false;
+      
+      if (result.data) {
+        const records = (result.data.records || []).filter(r => r.unit_id && r.unit_id.startsWith('3.76.58'));
+        state.companyHistory = records;
+        renderCompanyHistory(records, companyName);
+      } else {
+        state.companyHistory = [];
+        renderCompanyHistory([], companyName);
+      }
+    }
+
+    function closeCompanyPanel() {
+      document.getElementById('companyPanel').classList.remove('active');
+      // Only close overlay if detail panel is also closed
+      if (!document.getElementById('detailPanel').classList.contains('active')) {
+        document.getElementById('panelOverlay').classList.remove('active');
+      }
+      state.mode = document.getElementById('detailPanel').classList.contains('active') ? 'detail' : 'list';
+    }
+
+    // ============================================================
+    // UI Helpers
+    // ============================================================
+    function showLoading() {
+      document.getElementById('loadingSpinner').classList.remove('hidden');
+    }
+
+    function hideLoading() {
+      document.getElementById('loadingSpinner').classList.add('hidden');
+    }
+
+    function showError(msg) {
+      document.getElementById('errorMessage').textContent = msg;
+      document.getElementById('errorBanner').classList.remove('hidden');
+      setTimeout(hideError, 8000);
+    }
+
+    function hideError() {
+      document.getElementById('errorBanner').classList.add('hidden');
+    }
+
+    // ============================================================
+    // Keyboard Navigation
+    // ============================================================
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (state.mode === 'company') closeCompanyPanel();
+        else closeAllPanels();
+      }
+    });
+
+    // ============================================================
+    // Search Debounce
+    // ============================================================
+    let searchTimer;
+    document.getElementById('searchInput').addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        triggerSearch();
+      }, 300);
+    });
+
+    // Enter key in search
+    document.getElementById('searchInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        clearTimeout(searchTimer);
+        triggerSearch();
+      }
+    });
+
+    // ============================================================
+    // Date Filter Listeners
+    // ============================================================
+    document.getElementById('dateFrom').addEventListener('change', applyFilters);
+    document.getElementById('dateTo').addEventListener('change', applyFilters);
+
+    // ============================================================
+    // Offline Detection
+    // ============================================================
+    window.addEventListener('online', () => {
+      document.getElementById('offlineBanner').classList.add('hidden');
+    });
+    window.addEventListener('offline', () => {
+      document.getElementById('offlineBanner').classList.remove('hidden');
+    });
+
+    // ============================================================
+    // Init
+    // ============================================================
+    async function init() {
+      showLoading();
+      renderSkeletons(5);
+      
+      // Try local cache first
+      const localOk = await tryLoadLocalData();
+      if (localOk) {
+        state.allRecords = [...state.records];
+        applyFilters();
+        renderFilters(state.records);
+        hideLoading();
+        return;
+      }
+      
+      // Fall back to PCC API
+      const result = await fetchListByUnit(1);
+      if (result.data) {
+        state.records = result.data.records || [];
+        state.totalRecords = result.data.total_records || state.records.length;
+        state.allRecords = [...state.records];
+        applyFilters();
+        renderFilters(state.records);
+      } else {
+        showError(result.error);
+        document.getElementById('resultsSection').innerHTML = '';
+        document.getElementById('statsText').textContent = '載入失敗';
+      }
+      
+      hideLoading();
+    }
+
+    init();
+  </script>
+</body>
+</html>
