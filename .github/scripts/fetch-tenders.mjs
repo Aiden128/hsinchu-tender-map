@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE = "https://pcc-api.openfun.app/api";
 const UNIT_ID = "3.76.58";
-const CONCURRENCY = 5; // parallel page fetches
+const CONCURRENCY = 2; // parallel page fetches (higher causes 429 rate limiting)
 
 async function fetchJSON(url, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
