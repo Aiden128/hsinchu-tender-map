@@ -476,9 +476,10 @@
         html += `</div>`;
       }
 
-      // Companies from the original record
-      if (state.selectedTender) {
-        const companies = extractCompanies(state.selectedTender);
+      // Companies from the brief
+      const recordForCompanies = state.selectedTender;
+      if (recordForCompanies && recordForCompanies.brief) {
+        const companies = extractCompanies(recordForCompanies);
         if (companies.length > 0) {
           html += `<div class="mt-6 pt-4 border-t border-[var(--color-border)]"><h3 class="text-sm font-semibold text-[var(--color-text)] mb-3">相關廠商</h3>`;
           for (const c of companies) {
@@ -766,9 +767,7 @@
     async function openDetail(unitId, jobNumber, cardEl) {
       state.mode = 'detail';
       state.selectedTender = { unit_id: unitId, job_number: jobNumber };
-      // Store the card data
       if (cardEl) {
-        // Find the record in state
         state.selectedTender = state.currentPageRecords.find(r => r.unit_id === unitId && r.job_number === jobNumber) || { unit_id: unitId, job_number: jobNumber };
       }
       
@@ -777,12 +776,10 @@
       renderDetailSkeleton();
       
       const result = await fetchTenderDetail(unitId, jobNumber);
-      if (result.data) {
-        state.selectedTenderDetail = result.data;
-        // Merge with original record for companies
-        renderDetailPanel(result.data);
+      if (result.data && result.data.records && result.data.records.length > 0) {
+        state.selectedTenderDetail = result.data.records[0];
+        renderDetailPanel(result.data.records[0]);
       } else {
-        // Render what we have from the original record
         renderDetailPanel({ detail: { type: state.selectedTender?.brief?.type || '' } });
       }
     }
