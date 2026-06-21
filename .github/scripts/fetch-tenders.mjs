@@ -1,6 +1,3 @@
-// Periodically fetch all Hsinchu City tender data from PCC API
-// and save as page-based JSON files for GitHub Pages hosting.
-
 import { mkdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,9 +5,12 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE = "https://pcc-api.openfun.app/api";
 const UNIT_ID = "3.76.58";
-const CONCURRENCY = 2; // parallel page fetches (higher causes 429 rate limiting)
+const PAGE_DELAY_MS = 1200; // gap between page requests to avoid 429
+const BURST_COOLDOWN_MS = 12000; // pause all when 429 hits
 
-async function fetchJSON(url, retries = 3) {
+let cooldownUntil = 0; // shared timestamp, workers check before each request
+
+async function fetchJSON(url, retries = 4) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const res = await fetch(url, {
@@ -21,21 +21,29 @@ async function fetchJSON(url, retries = 3) {
         },
       });
       if (res.ok) return res.json();
-      // Retry on 429 (rate limit), 5xx (server error); fail fast on 4xx auth errors
-      if (res.status === 429 || res.status >= 500) {
+
+      if (res.status === 429) {
+        const cooldown = Math.min(5000 * 2 ** attempt, 30000);
+        console.warn(`  429 on attempt ${attempt}/${retries} — cooling down ${cooldown}ms...`);
+        cooldownUntil = Date.now() + cooldown + BURST_COOLDOWN_MS;
         if (attempt < retries) {
-          const delay = Math.min(1000 * 2 ** attempt, 15000);
-          console.warn(`  HTTP ${res.status} on attempt ${attempt}/${retries}, retrying in ${delay}ms...`);
+          await new Promise((r) => setTimeout(r, cooldown));
+          continue;
+        }
+      } else if (res.status >= 500) {
+        if (attempt < retries) {
+          const delay = Math.min(2000 * 2 ** attempt, 15000);
+          console.warn(`  HTTP ${res.status} on attempt ${attempt}/${retries}, retry in ${delay}ms...`);
           await new Promise((r) => setTimeout(r, delay));
           continue;
         }
       }
       throw new Error(`HTTP ${res.status}: ${url}`);
     } catch (e) {
-      if (e.message.startsWith("HTTP ")) throw e; // Non-retryable HTTP error
+      if (e.message.startsWith("HTTP ")) throw e;
       if (attempt === retries) throw e;
-      const delay = Math.min(1000 * 2 ** attempt, 15000);
-      console.warn(`  Network error on attempt ${attempt}/${retries}: ${e.message}, retrying in ${delay}ms...`);
+      const delay = Math.min(2000 * 2 ** attempt, 15000);
+      console.warn(`  Network error attempt ${attempt}/${retries}: ${e.message}, retry in ${delay}ms...`);
       await new Promise((r) => setTimeout(r, delay));
     }
   }
@@ -46,7 +54,6 @@ async function main() {
   const dataDir = join(buildDir, "data");
   mkdirSync(dataDir, { recursive: true });
 
-  // ── Fetch page 1 to discover total count ──
   console.log("Fetching page 1...");
   const first = await fetchJSON(`${BASE}/listbyunit?unit_id=${UNIT_ID}&page=1`);
   const total = first.total || 0;
@@ -55,29 +62,30 @@ async function main() {
   writeFileSync(join(dataDir, "page-1.json"), JSON.stringify(first));
   console.log(`Page 1/${totalPages}: ${first.records?.length || 0} records`);
 
-  // ── Fetch remaining pages with concurrency limit ──
-  const pages = [];
-  for (let p = 2; p <= totalPages; p++) pages.push(p);
-
-  let idx = 0;
   const errors = [];
 
-  async function worker() {
-    while (idx < pages.length) {
-      const page = pages[idx++];
-      const url = `${BASE}/listbyunit?unit_id=${UNIT_ID}&page=${page}`;
-      try {
-        const data = await fetchJSON(url);
-        writeFileSync(join(dataDir, `page-${page}.json`), JSON.stringify(data));
-        console.log(`Page ${page}/${totalPages}: ${data.records?.length || 0} records`);
-      } catch (e) {
-        errors.push(`Page ${page}: ${e.message}`);
-        console.error(`Page ${page}/${totalPages} FAILED: ${e.message}`);
-      }
+  // Sequential fetch with rate limiting
+  for (let page = 2; page <= totalPages; page++) {
+    // Global cooldown check — if another page triggered a 429, we all wait
+    const now = Date.now();
+    if (now < cooldownUntil) {
+      const wait = cooldownUntil - now;
+      console.log(`  Cooldown ${Math.round(wait / 1000)}s...`);
+      await new Promise((r) => setTimeout(r, wait));
     }
-  }
 
-  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+    const url = `${BASE}/listbyunit?unit_id=${UNIT_ID}&page=${page}`;
+    try {
+      const data = await fetchJSON(url);
+      writeFileSync(join(dataDir, `page-${page}.json`), JSON.stringify(data));
+      console.log(`Page ${page}/${totalPages}: ${data.records?.length || 0} records`);
+    } catch (e) {
+      errors.push(`Page ${page}: ${e.message}`);
+      console.error(`Page ${page}/${totalPages} FAILED: ${e.message}`);
+    }
+
+    await new Promise((r) => setTimeout(r, PAGE_DELAY_MS));
+  }
 
   // ── Count actually written pages ──
   const successfulPages = totalPages - errors.length;
